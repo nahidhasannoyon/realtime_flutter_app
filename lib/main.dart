@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -20,7 +22,7 @@ class MyApp extends StatelessWidget {
   // Build your ws:// URI with query params and custom headers
   final WebSocketChannel channel = IOWebSocketChannel.connect(
     Uri(
-      scheme: 'ws', 
+      scheme: 'ws',
       host: _host,
       port: _port,
       queryParameters: {
@@ -55,6 +57,16 @@ class ChatPage extends StatefulWidget {
 class ChatPageState extends State<ChatPage> {
   final _controller = TextEditingController();
   final List<String> _messages = []; // Store received messages
+  Timer? _heartbeatTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // send a ping every 30s
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      widget.channel.sink.add(jsonEncode({'type': 'ping'}));
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -73,8 +85,19 @@ class ChatPageState extends State<ChatPage> {
                   return const Center(child: CircularProgressIndicator());
                 }
                 if (snapshot.hasData) {
-                  //Added to show all messages
-                  _messages.add(snapshot.data.toString());
+                  final raw = snapshot.data.toString();
+                  // parse JSON to see if it's our pong
+                  try {
+                    final msg = jsonDecode(raw);
+                    if (msg['type'] == 'pong') {
+                      // got our heartbeat back, ignore
+                    } else {
+                      _messages.add(raw);
+                    }
+                  } catch (_) {
+                    // not JSON, assume normal chat
+                    _messages.add(raw);
+                  }
                 }
                 return ListView.builder(
                   itemCount: _messages.length,
@@ -116,6 +139,7 @@ class ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    _heartbeatTimer?.cancel();
     widget.channel.sink.close();
     _controller.dispose(); // Dispose the controller
     super.dispose();
